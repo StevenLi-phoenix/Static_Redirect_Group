@@ -224,6 +224,35 @@ export default {
         });
       }
 
+      // 验证 GitHub Token 有效性
+      const tokenValidationUrl = `https://api.github.com/user`;
+      const tokenCheckResp = await fetch(tokenValidationUrl, {
+        headers: {
+          "Authorization": `Bearer ${token}`,
+          "User-Agent": "Cloudflare-Worker",
+          "Accept": "application/vnd.github.v3+json"
+        }
+      });
+
+      if (!tokenCheckResp.ok) {
+        console.error("CF/GitHub Token Invalid. Status:", tokenCheckResp.status);
+        // 返回 403 + 一堆随机数据
+        const nonsenseData = {
+          nonsense: "Lorem ipsum dolor sit amet, consectetur adipiscing elit. Sed do eiusmod tempor incididunt ut labore et dolore magna aliqua. Ut enim ad minim veniam, quis nostrud exercitation ullamco laboris.",
+          randomId: Math.random().toString(36).substring(2, 15) + Math.random().toString(36).substring(2, 15),
+          timestamp: Date.now(),
+          uuid: "550e8400-e29b-41d4-a716-446655440000",
+          data: Array(100).fill(0).map(() => Math.random()).slice(0, 50)
+        };
+        return Response.json(nonsenseData, { 
+            status: 403,
+            headers: { 
+              "Access-Control-Allow-Origin": "*",
+              "X-Token-Valid": "false"
+            }
+        });
+      }
+
       const getUrl = `https://api.github.com/repos/${owner}/${repo}/contents/${filePath}?ref=${branch}`;
       
       const getResp = await fetch(getUrl, {
@@ -237,6 +266,20 @@ export default {
       if (!getResp.ok) {
         const errText = await getResp.text();
         console.error("GitHub Fetch Error:", errText);
+        // 检查是否是 CF 拦截 (内容或状态码)
+        const isCFBlock = getResp.status === 403 || errText.includes("block") || errText.includes("cf");
+        if (isCFBlock) {
+          const nonsenseData = {
+            nonsense: "Vivamus suscipit tortor eget felis porttitor volutpat. Donec rutrum congue leo eget malesuada.",
+            error_code: Math.floor(Math.random() * 10000),
+            cf_ray: "cf_" + Math.random().toString(36).substring(2, 15),
+            attempt_time: new Date().toISOString()
+          };
+          return Response.json(nonsenseData, { 
+              status: 403,
+              headers: { "Access-Control-Allow-Origin": "*" }
+          });
+        }
         return Response.json({ error: "Failed to fetch file from GitHub: " + getResp.status }, { 
             status: 502,
             headers: { "Access-Control-Allow-Origin": "*" }
