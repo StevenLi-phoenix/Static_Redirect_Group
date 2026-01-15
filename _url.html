@@ -143,27 +143,50 @@
         // LocalStorage 密钥
         const STORAGE_KEY = 'shortlink_form_data';
         const STORAGE_TIMESTAMP_KEY = 'shortlink_form_timestamp';
+        const STORAGE_RETRY_KEY = 'shortlink_form_retry';
+
+        function saveFormData(data) {
+            localStorage.setItem(STORAGE_KEY, JSON.stringify(data));
+            localStorage.setItem(STORAGE_TIMESTAMP_KEY, Date.now().toString());
+        }
+
+        function restoreFormData() {
+            const savedData = localStorage.getItem(STORAGE_KEY);
+            if (!savedData) {
+                return null;
+            }
+            try {
+                const data = JSON.parse(savedData);
+                document.getElementById('pathname').value = data.pathname || '';
+                document.getElementById('url').value = data.url || '';
+                document.getElementById('expired_at').value = data.expired_at || '';
+                return data;
+            } catch (e) {
+                console.error('恢复表单数据失败:', e);
+                localStorage.removeItem(STORAGE_KEY);
+                return null;
+            }
+        }
+
+        function refreshForCFValidation(data) {
+            saveFormData(data);
+            localStorage.setItem(STORAGE_RETRY_KEY, 'true');
+            window.location.reload();
+        }
 
         // 页面加载时恢复表单数据
         window.addEventListener('DOMContentLoaded', function() {
-            const savedData = localStorage.getItem(STORAGE_KEY);
             const savedTimestamp = localStorage.getItem(STORAGE_TIMESTAMP_KEY);
-            
-            if (savedData) {
-                try {
-                    const data = JSON.parse(savedData);
-                    document.getElementById('pathname').value = data.pathname || '';
-                    document.getElementById('url').value = data.url || '';
-                    document.getElementById('expired_at').value = data.expired_at || '';
-                    
-                    // 显示恢复提示
-                    if (savedTimestamp) {
-                        const time = new Date(parseInt(savedTimestamp)).toLocaleTimeString();
-                        console.log('已从 ' + time + ' 恢复表单数据');
-                    }
-                } catch (e) {
-                    console.error('恢复表单数据失败:', e);
-                }
+            const restoredData = restoreFormData();
+
+            if (restoredData && savedTimestamp) {
+                const time = new Date(parseInt(savedTimestamp)).toLocaleTimeString();
+                console.log('已从 ' + time + ' 恢复表单数据');
+            }
+
+            if (restoredData && localStorage.getItem(STORAGE_RETRY_KEY) === 'true') {
+                localStorage.removeItem(STORAGE_RETRY_KEY);
+                document.getElementById('createForm').requestSubmit();
             }
         });
 
@@ -180,6 +203,11 @@
             const pathname = document.getElementById('pathname').value;
             const url = document.getElementById('url').value;
             const expiredAtInput = document.getElementById('expired_at').value;
+            const retryPayload = {
+                pathname: pathname,
+                url: url,
+                expired_at: expiredAtInput
+            };
 
             // 验证
             if (pathname.length < 5 || pathname.length > 10) {
@@ -217,6 +245,18 @@
                 });
 
                 const text = await response.text();
+                const trimmedText = text.trim();
+                const contentType = response.headers.get('content-type') || '';
+                const looksLikeHtml = contentType.includes('text/html')
+                    || trimmedText.startsWith('<!DOCTYPE')
+                    || trimmedText.startsWith('<html');
+
+                if (response.status === 403 || looksLikeHtml) {
+                    console.warn('CF Block detected. Refreshing page to validate...');
+                    refreshForCFValidation(retryPayload);
+                    return;
+                }
+
                 let result;
                 try {
                     result = JSON.parse(text);
@@ -283,13 +323,7 @@
                     document.getElementById('createForm').reset();
                 } else {
                     // 检查是否是 CF 拦截 (403)
-                    if (response.status === 403) {
-                        // CF 拦截了请求：刷新页面以通过机器人检测
-                        console.warn('CF Block detected. Refreshing page to validate...');
-                        refreshForCFValidation();
-                    } else {
-                        showError(result.error || '提交失败');
-                    }
+                    showError(result.error || '提交失败');
                 }
             } catch (err) {
                 console.error(err);
@@ -306,14 +340,7 @@
             document.getElementById('submitBtn').disabled = false;
         }
 
-        // 移除旧的自动重试逻辑，改为刷新页面
-        window.addEventListener('DOMContentLoaded', function() {
-            // 如果是从 CF 阻止后刷新回来的，自动填充表单
-            const savedData = localStorage.getItem(STORAGE_KEY);
-            if (savedData) {
-                console.log('表单数据已从 LocalStorage 恢复');
-            }
-        });
+        
     </script>
 </body>
 </html>
