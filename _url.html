@@ -213,6 +213,9 @@
                     clearRetryState();
                     return;
                 }
+                const messageDiv = document.getElementById('message');
+                messageDiv.textContent = '检测到 Cloudflare 挑战拦截，正在自动重试提交...';
+                messageDiv.className = 'message';
                 document.getElementById('createForm').requestSubmit();
             }
         });
